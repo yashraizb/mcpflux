@@ -1,0 +1,7 @@
+mcp
+fastmcp
+pandas
+duckdb
+openpyxl
+python-dotenv
+anthropic

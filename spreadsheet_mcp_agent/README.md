@@ -1,0 +1,258 @@
+# Spreadsheet MCP Agent
+
+A production-quality MCP (Model Context Protocol) server that allows users to upload CSV or Excel files and ask natural language questions about the data. The server uses an LLM to convert questions to SQL, executes the queries on the data using DuckDB, and returns results.
+
+## Features
+
+- **File Support**: Load CSV and Excel files (.csv, .xlsx, .xls)
+- **Natural Language Queries**: Convert questions to SQL automatically using an LLM
+- **DuckDB Execution**: Fast, reliable SQL execution on pandas DataFrames
+- **Error Recovery**: Automatic retry logic with LLM-powered SQL correction
+- **Type Hints**: Full type annotation for code clarity and IDE support
+- **Structured Logging**: Comprehensive logging for debugging and monitoring
+- **Production Quality**: Clean architecture, error handling, and configuration management
+
+## Architecture
+
+```
+Claude Desktop
+    ↓
+MCP Server (query_spreadsheet)
+    ↓
+File Loader (CSV/Excel)
+    ↓
+Schema Extractor
+    ↓
+LLM (SQL Generation)
+    ↓
+SQL Executor (DuckDB)
+    ↓
+Error Recovery (if needed)
+    ↓
+Result Formatter (JSON)
+```
+
+## Module Structure
+
+- **server.py**: Main MCP server with the `query_spreadsheet` tool
+- **file_loader.py**: Load CSV/Excel files into pandas DataFrames
+- **schema_extractor.py**: Extract and format schema information for LLM
+- **sql_generator.py**: Convert natural language to SQL using LLM
+- **sql_executor.py**: Execute SQL queries on DataFrames using DuckDB
+- **error_recovery.py**: Retry mechanism with LLM-powered error correction
+- **llm_client.py**: Wrapper for OpenAI API calls
+- **config.py**: Configuration management and validation
+
+## Installation
+
+1. Clone the repository and navigate to the project directory:
+
+```bash
+cd spreadsheet_mcp_agent
+```
+
+2. Install dependencies:
+
+```bash
+pip install -r spreadsheet_mcp_agent/requirements.txt
+```
+
+3. Set up environment variables:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+Optional configuration:
+
+```bash
+export MODEL_NAME="gpt-4o-mini"  # Default
+```
+
+## Running the Server
+
+### From Command Line
+
+```bash
+python -m spreadsheet_mcp_agent.server
+```
+
+### From Python
+
+```python
+from spreadsheet_mcp_agent import run_server
+
+run_server()
+```
+
+## Integration with Claude Desktop
+
+1. Create a configuration file for Claude Desktop (e.g., `claude_config.json`):
+
+```json
+{
+	"mcpServers": {
+		"spreadsheet_agent": {
+			"command": "python",
+			"args": ["-m", "spreadsheet_mcp_agent.server"],
+			"env": {
+				"OPENAI_API_KEY": "your-api-key-here"
+			}
+		}
+	}
+}
+```
+
+2. Update your Claude Desktop configuration to include this server.
+
+## Usage Examples
+
+### Query 1: Find highest revenue country
+
+```
+File: sales_data.csv
+Question: "Which country has the highest revenue?"
+```
+
+Result:
+
+```json
+{
+	"success": true,
+	"generated_sql": "SELECT country, SUM(revenue) as total_revenue FROM data GROUP BY country ORDER BY total_revenue DESC LIMIT 1",
+	"result_preview": [{ "country": "USA", "total_revenue": 50000 }],
+	"row_count": 1,
+	"total_columns": 2
+}
+```
+
+### Query 2: Sales per product
+
+```
+File: sales_data.csv
+Question: "Total sales per product"
+```
+
+Result:
+
+```json
+{
+	"success": true,
+	"generated_sql": "SELECT product, SUM(sales) as total_sales FROM data GROUP BY product ORDER BY total_sales DESC",
+	"result_preview": [
+		{ "product": "Widget A", "total_sales": 15000 },
+		{ "product": "Widget B", "total_sales": 12000 },
+		{ "product": "Widget C", "total_sales": 8000 }
+	],
+	"row_count": 3,
+	"total_columns": 2
+}
+```
+
+### Query 3: Top customers by revenue
+
+```
+File: customer_data.csv
+Question: "Top 5 customers by revenue"
+```
+
+Result:
+
+```json
+{
+	"success": true,
+	"generated_sql": "SELECT customer_name, revenue FROM data ORDER BY revenue DESC LIMIT 5",
+	"result_preview": [
+		{ "customer_name": "Acme Corp", "revenue": 25000 },
+		{ "customer_name": "TechStart Inc", "revenue": 18000 },
+		{ "customer_name": "Global Solutions", "revenue": 15000 },
+		{ "customer_name": "DataFlow Ltd", "revenue": 12000 },
+		{ "customer_name": "CloudBase Co", "revenue": 10000 }
+	],
+	"row_count": 5,
+	"total_columns": 2
+}
+```
+
+## Example Data
+
+Create a sample CSV file (`sample_data.csv`):
+
+```csv
+product,country,revenue,date
+Widget A,USA,5000,2024-01-01
+Widget B,USA,3000,2024-01-01
+Widget A,UK,4000,2024-01-02
+Widget C,Canada,2000,2024-01-02
+Widget B,UK,3500,2024-01-03
+Widget A,Canada,4500,2024-01-03
+```
+
+## Configuration
+
+Edit `config.py` to customize:
+
+```python
+MODEL_NAME = "gpt-4o-mini"      # LLM model to use
+MAX_SQL_RETRIES = 3             # Max retry attempts on SQL error
+MAX_SAMPLE_ROWS = 5             # Rows shown in schema
+MAX_RESULT_ROWS = 100           # Max rows returned in results
+```
+
+## Error Handling
+
+The server gracefully handles:
+
+- Invalid file formats
+- Empty datasets
+- Malformed SQL generated by the LLM
+- LLM API failures
+- File not found errors
+
+When SQL execution fails, the error recovery mechanism:
+
+1. Captures the error message
+2. Sends original SQL + error + schema back to LLM
+3. Asks the model to fix the SQL
+4. Retries execution (up to 3 attempts)
+
+## Logging
+
+The server logs:
+
+- File loading events
+- Schema extraction
+- Generated SQL queries
+- SQL execution status
+- Retry attempts
+- Errors and exceptions
+
+View logs by running with appropriate log level:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+## Code Quality
+
+- Full type hints using `typing` module
+- Clean separation of concerns across modules
+- Comprehensive docstrings for all public functions
+- Error handling with meaningful messages
+- No hardcoded values (all in config.py)
+- Follows PEP 8 style guidelines
+
+## Requirements
+
+- Python 3.9+
+- pandas
+- duckdb
+- fastmcp
+- openai
+- python-dotenv
+- openpyxl (for Excel support)
+
+## License
+
+MIT
