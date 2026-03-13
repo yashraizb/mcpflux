@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _SQL_GENERATION_PROMPT = ChatPromptTemplate.from_messages([
     ("human", """You are a SQL expert. Generate a SQL query based on the following:
 
-A table named 'data' exists with the following schema:
+The following tables are available:
 
 {schema}
 

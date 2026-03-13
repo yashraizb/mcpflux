@@ -18,7 +18,7 @@ import pandas as pd
 from .config import config
 from .events import LoggingObserver, PipelineEvent, PipelineObserver, PipelineStage
 from .handlers import retry_with_recovery
-from .loaders import FileLoaderContext
+from .loaders import DataContext, FileLoaderContext
 from .schema_extractor import extract_schema
 from .sql_executor import execute_sql
 from .sql_generator import generate_sql
@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 class SpreadsheetQueryFacade:
     """Facade that exposes a single execute() method over the 5-step pipeline:
 
-    1. Load file      (Strategy: FileLoaderContext picks format)
-    2. Extract schema
+    1. Load file(s)   (Strategy: FileLoaderContext picks format → DataContext)
+    2. Extract schema (all tables described by name)
     3. Generate SQL   (Strategy: provider-agnostic via providers.py)
     4. Execute SQL    (Chain of Responsibility: handlers.py)
     5. Format result
@@ -47,7 +47,8 @@ class SpreadsheetQueryFacade:
         """Run the full query pipeline and return a result dict.
 
         Args:
-            file_path: Path to a CSV or Excel file.
+            file_path: Path to a CSV or Excel file, or multiple comma-separated
+                       paths for cross-file queries.
             question: Natural language question about the data.
 
         Returns:
@@ -65,10 +66,10 @@ class SpreadsheetQueryFacade:
         })
 
         try:
-            df = self._load(file_path, run_id)
-            schema = self._extract_schema(df, run_id)
+            data_context = self._load(file_path, run_id)
+            schema = self._extract_schema(data_context, run_id)
             sql = self._generate_sql(schema, question, run_id)
-            final_sql, result_df, attempt = self._execute_sql(df, schema, sql, run_id)
+            final_sql, result_df, attempt = self._execute_sql(data_context, schema, sql, run_id)
             result = self._format_result(final_sql, result_df)
 
             self._notify(PipelineStage.COMPLETE, {
@@ -91,13 +92,14 @@ class SpreadsheetQueryFacade:
     # Private pipeline steps
     # ------------------------------------------------------------------
 
-    def _load(self, file_path: str, run_id: str) -> pd.DataFrame:
-        df = self._loader.load(file_path)
-        self._notify(PipelineStage.FILE_LOADED, {"run_id": run_id, "shape": list(df.shape)})
-        return df
+    def _load(self, file_path: str, run_id: str) -> DataContext:
+        data_context = self._loader.load(file_path)
+        shapes = {name: list(df.shape) for name, df in data_context.items()}
+        self._notify(PipelineStage.FILE_LOADED, {"run_id": run_id, "tables": shapes})
+        return data_context
 
-    def _extract_schema(self, df: pd.DataFrame, run_id: str) -> str:
-        schema = extract_schema(df)
+    def _extract_schema(self, data_context: DataContext, run_id: str) -> str:
+        schema = extract_schema(data_context)
         self._notify(PipelineStage.SCHEMA_EXTRACTED, {"run_id": run_id, "schema_length": len(schema)})
         return schema
 
@@ -107,12 +109,12 @@ class SpreadsheetQueryFacade:
         return sql
 
     def _execute_sql(
-        self, df: pd.DataFrame, schema: str, sql: str, run_id: str
+        self, data_context: DataContext, schema: str, sql: str, run_id: str
     ) -> tuple[str, pd.DataFrame, int]:
         original_sql = sql
 
         def execute_func(s: str) -> Any:
-            return execute_sql(df, s)
+            return execute_sql(data_context, s)
 
         final_sql, result_df = retry_with_recovery(
             schema, sql, execute_func, max_retries=config.MAX_SQL_RETRIES
