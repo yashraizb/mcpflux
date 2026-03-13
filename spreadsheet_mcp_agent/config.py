@@ -13,8 +13,14 @@ class Config:
     """Configuration container for MCP server."""
 
     # LLM Configuration
-    MODEL_NAME: str = os.getenv("MODEL_NAME", "claude-3-5-sonnet-20241022")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")  # "anthropic" | "openai"
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "claude-haiku-4-5")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
+    # Observability
+    EVENTS_LOG_PATH: str = os.getenv("EVENTS_LOG_PATH", "")   # default: ~/.mcpflux/events.jsonl
+    METRICS_DB_PATH: str = os.getenv("METRICS_DB_PATH", "")   # default: ~/.mcpflux/metrics.db
 
     # SQL Execution Configuration
     MAX_SQL_RETRIES: int = 3

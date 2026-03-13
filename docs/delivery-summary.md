@@ -1,3 +1,5 @@
+[← Back to Contents](../README.md#documentation)
+
 # FINAL DELIVERY SUMMARY
 
 ## ✅ SPREADSHEET MCP AGENT - COMPLETE & READY

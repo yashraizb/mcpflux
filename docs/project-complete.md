@@ -1,3 +1,5 @@
+[← Back to Contents](../README.md#documentation)
+
 # 🎉 Project Completion Summary
 
 ## ✅ Complete Spreadsheet MCP Agent - DELIVERED

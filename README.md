@@ -234,10 +234,23 @@ Full structured logging to debug queries:
 - OpenAI API key
 - Internet connection (for LLM calls)
 
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Getting Started](docs/getting-started.md) | 5-minute install, config, and first query |
+| [Setup Guide](docs/setup.md) | Detailed installation and environment setup |
+| [Claude Desktop Integration](docs/claude-integration.md) | Connect to Claude Desktop on Mac/Windows/Linux |
+| [Quick Reference](docs/quick-reference.md) | Commands, config, and common queries at a glance |
+| [Architecture](docs/architecture.md) | System design, data flow, and module breakdown |
+| [Implementation Summary](docs/implementation-summary.md) | What was built and how it works |
+| [Files Index](docs/files-index.md) | Complete codebase file descriptions |
+| [Documentation Index](docs/documentation-index.md) | Learning paths by use case |
+| [Deployment Checklist](docs/deployment-checklist.md) | Pre-deployment verification steps |
+| [Project Checklist](docs/project-checklist.md) | Deliverables and features checklist |
+| [Project Complete](docs/project-complete.md) | Completion summary and production readiness |
+| [Delivery Summary](docs/delivery-summary.md) | High-level overview of delivered components |
+
 ## License
 
 MIT
-
-## Support
-
-For detailed documentation, see [spreadsheet_mcp_agent/README.md](spreadsheet_mcp_agent/README.md)

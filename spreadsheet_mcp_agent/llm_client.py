@@ -1,67 +1,56 @@
-"""LLM client for generating SQL queries."""
+"""LLM client: RetryDecorator (Decorator pattern) + provider delegation."""
 
 import logging
-from typing import Optional
+import time
+from typing import Any, Optional
 
-from anthropic import Anthropic
+import anthropic
+from langchain_core.runnables import Runnable
 
-from .config import config
+from .providers import LLMProvider, get_provider
 
 logger = logging.getLogger(__name__)
 
 
-class LLMClient:
-    """Wrapper for Anthropic API calls."""
+class RetryDecorator(Runnable):
+    """Decorator pattern: wraps any LangChain Runnable with exponential-backoff
+    retry logic on HTTP 529 (API overloaded). Transparent to callers — exposes
+    the same .invoke() interface as the wrapped Runnable.
+    """
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        """Initialize LLM client.
+    def __init__(self, runnable: Runnable, max_retries: int = 3):
+        self._runnable = runnable
+        self._max_retries = max_retries
 
-        Args:
-            api_key: Anthropic API key. Defaults to config.ANTHROPIC_API_KEY.
-            model: Model name. Defaults to config.MODEL_NAME.
-        """
-        self.api_key = api_key or config.ANTHROPIC_API_KEY
-        self.model = model or config.MODEL_NAME
-        self.client = Anthropic(api_key=self.api_key)
+    def invoke(self, inputs: Any, config: Optional[Any] = None) -> Any:
+        for attempt in range(self._max_retries):
+            try:
+                return self._runnable.invoke(inputs, config)
+            except anthropic.APIStatusError as e:
+                if e.status_code == 529 and attempt < self._max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        f"API overloaded (529), retrying in {wait}s... "
+                        f"({attempt + 1}/{self._max_retries})"
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
 
-    def generate_text(self, prompt: str) -> str:
-        """Generate text using Anthropic API.
 
-        Args:
-            prompt: The prompt to send to the model.
+def get_llm() -> Any:
+    """Return the LangChain Runnable from the configured LLM provider."""
+    return get_provider().get_runnable()
 
-        Returns:
-            Generated text response.
 
-        Raises:
-            RuntimeError: If API call fails.
-        """
-        try:
-            logger.info(f"Calling {self.model} with prompt of length {len(prompt)}")
-
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            result = response.content[0].text
-            logger.info("LLM generation successful")
-            return result
-
-        except Exception as e:
-            logger.error(f"LLM generation failed: {str(e)}")
-            raise RuntimeError(f"LLM generation failed: {str(e)}") from e
+def invoke_with_retry(chain: Runnable, inputs: Any, max_retries: int = 3) -> Any:
+    """Convenience wrapper: invoke chain with 529 retry. Delegates to RetryDecorator."""
+    return RetryDecorator(chain, max_retries=max_retries).invoke(inputs)
 
 
 def generate_text(prompt: str) -> str:
-    """Convenience function to generate text using default LLM client.
-
-    Args:
-        prompt: The prompt to send to the model.
-
-    Returns:
-        Generated text response.
-    """
-    client = LLMClient()
-    return client.generate_text(prompt)
+    """Generate text from a plain string prompt using the configured provider."""
+    provider: LLMProvider = get_provider()
+    result = provider.generate(prompt)
+    logger.info("LLM generation successful")
+    return result

@@ -1,3 +1,5 @@
+[← Back to Contents](../README.md#documentation)
+
 # Setup Guide
 
 ## Prerequisites
@@ -20,14 +22,14 @@ Using venv:
 
 ```bash
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scriptsctivate
 ```
 
 Using uv:
 
 ```bash
 uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows: .venv\Scriptsctivate
 ```
 
 ### 3. Install Dependencies
@@ -108,7 +110,7 @@ Similar to Mac, but use the Windows path format and ensure Python is in PATH:
 	"mcpServers": {
 		"spreadsheet_agent": {
 			"command": "python",
-			"args": ["C:\\path\\to\\mcpflux\\main.py"],
+			"args": ["C:\path\to\mcpflux\main.py"],
 			"env": {
 				"OPENAI_API_KEY": "sk-your-api-key"
 			}
