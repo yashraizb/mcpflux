@@ -1,539 +1,331 @@
 [← Back to Contents](../README.md#documentation)
 
-# Architecture & Design Documentation
+# Architecture & Design
 
-## System Architecture
-
-### High-Level Overview
+## High-Level Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Claude Desktop                           │
-└────────────────────┬────────────────────────────────────────┘
-                     │ (question + file path)
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                   MCP Server (main.py)                      │
-│          ┌──────────────────────────────────────┐           │
-│          │  query_spreadsheet(file, question)   │           │
-│          └──────────────┬───────────────────────┘           │
-└─────────────────────────┼────────────────────────────────────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼──────┐  ┌─────▼──────┐  ┌────▼──────────┐
-    │   File    │  │  Schema    │  │  SQL Builder  │
-    │  Loader   │  │ Extractor  │  │    (LLM)      │
-    └────┬──────┘  └─────┬──────┘  └────┬──────────┘
-         │                │               │
-         └────────────────┼───────────────┘
-                          │
-                     ┌────▼──────┐
-                     │ SQL Query  │
-                     │  Executor  │
-                     │ (DuckDB)   │
-                     └────┬──────┘
-                          │
-              ┌───────────────────────┐
-              │   Error Recovery?     │
-              │   (LLM Retry Logic)   │
-              └───────────────────────┘
-                          │
-                     ┌────▼──────┐
-                     │  Results  │
-                     │  Formatter│
-                     └────┬──────┘
-                          │
-                     ┌────▼──────┐
-                     │   JSON    │
-                     │ Response  │
-                     └─────┬─────┘
-                           │
-                     ┌─────▼──────┐
-                     │   Claude   │
-                     │  Desktop   │
-                     └────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                      Claude Desktop                           │
+└────────────────────────┬──────────────────────────────────────┘
+                         │  file_path + question (MCP stdio)
+                         ▼
+┌───────────────────────────────────────────────────────────────┐
+│              MCP Server  (server.py / FastMCP)                │
+│         query_spreadsheet(file_path, question) → JSON         │
+└────────────────────────┬──────────────────────────────────────┘
+                         │
+                         ▼
+┌───────────────────────────────────────────────────────────────┐
+│           SpreadsheetQueryFacade  (facade.py)                 │
+│   Facade pattern — single execute() entry point               │
+│   Generates run_id, tracks timing, notifies observers         │
+│                                                               │
+│  ┌──────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │FileLoader    │  │ SchemaExtractor  │  │  SqlGenerator   │  │
+│  │Context       │  │ (schema_extrac- │  │  (sql_genera-   │  │
+│  │(loaders.py)  │  │  tor.py)        │  │   tor.py)       │  │
+│  │Strategy      │  └─────────────────┘  │  uses Provider  │  │
+│  └──────┬───────┘                       └────────┬────────┘  │
+│         │                                        │            │
+│  ┌──────▼───────────────────────────────────────▼──────────┐  │
+│  │         retry_with_recovery()  (handlers.py)            │  │
+│  │         Chain of Responsibility:                        │  │
+│  │         ExecuteHandler → CorrectionHandler →            │  │
+│  │                          ExhaustedHandler               │  │
+│  └─────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
+                         │  PipelineEvent at each stage
+                         ▼
+┌───────────────────────────────────────────────────────────────┐
+│                     Observers  (events.py)                    │
+│  LoggingObserver  │  JsonlObserver  │  SqliteObserver         │
+│  (Python logger)  │  (~/.mcpflux/  │  (~/.mcpflux/           │
+│                   │  events.jsonl) │   metrics.db)            │
+└───────────────────────────────────────────────────────────────┘
+                         │  (optional)
+                         ▼
+┌───────────────────────────────────────────────────────────────┐
+│               LangSmith  (via env vars)                       │
+│   Auto-traces every LangChain call: tokens, latency, retries  │
+└───────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Design Patterns
+
+### Facade (`facade.py`)
+`SpreadsheetQueryFacade.execute()` is the single entry point that hides the 5-step pipeline from callers. Each step is a private method. The facade also:
+- Generates a `run_id` (UUID4) for each run
+- Tracks wall-clock timing
+- Injects `run_id` and `latency_ms` into all emitted events
+- Emits an `ERROR` stage event on any unhandled exception
+
+### Observer (`events.py`)
+`PipelineObserver` (ABC) with `on_event(PipelineEvent)`. Concrete implementations:
+- `LoggingObserver` — logs to Python logger
+- `JsonlObserver` — appends one JSON line per event to a `.jsonl` file, immediately flushed
+- `SqliteObserver` — accumulates events per run_id, writes one row to SQLite on COMPLETE/ERROR
+- `MetricsObserver` — placeholder for push-based sinks (Prometheus, Datadog)
+
+### Strategy — File Loading (`loaders.py`)
+`FileLoaderContext` selects `CsvLoaderStrategy` or `ExcelLoaderStrategy` based on file extension. Add new formats by implementing `FileLoaderStrategy`.
+
+### Strategy — LLM Providers (`providers.py`)
+`LLMProvider` (ABC) with `generate()` and `get_runnable()`. Concrete implementations:
+- `AnthropicProvider` (default) — Claude via `langchain-anthropic`
+- `OpenAIProvider` — GPT via `langchain-openai`
+- `GoogleProvider` — Gemini via `langchain-google-genai` (placeholder)
+
+Selected by `LLM_PROVIDER` env var via `get_provider()` factory.
+
+### Chain of Responsibility (`handlers.py`)
+SQL execution flows through a handler chain carried by `SqlContext`:
+1. `ExecuteHandler` — attempts `execute_sql()`; marks `ctx.success = True` if OK
+2. `CorrectionHandler` — on failure, calls LLM with `(schema, broken_sql, error)` to get corrected SQL; increments `ctx.attempt`; re-triggers chain from step 1
+3. `ExhaustedHandler` — terminal handler, raises after `max_retries` exhausted
+
+---
 
 ## Module Dependencies
 
 ```
-server.py (main orchestrator)
-  ├── file_loader.py       (no internal deps)
-  ├── schema_extractor.py  (no internal deps)
-  ├── sql_generator.py
-  │   └── llm_client.py
-  │       └── openai (external)
-  ├── sql_executor.py      (uses duckdb)
-  └── error_recovery.py
-      └── llm_client.py
+server.py
+  └── facade.py
+        ├── events.py         (PipelineStage, PipelineEvent, all observers)
+        ├── loaders.py        (FileLoaderContext, strategies)
+        ├── schema_extractor.py
+        ├── sql_generator.py
+        │     └── providers.py  (LLMProvider, get_provider)
+        │           └── langchain-anthropic / langchain-openai
+        ├── handlers.py       (retry_with_recovery, handler chain)
+        │     └── sql_executor.py  (DuckDB)
+        └── config.py
 
-config.py (used by most modules)
+config.py  (imported by most modules)
 ```
 
-## Data Flow Diagram
+---
+
+## Data Flow
 
 ```
 Input: file_path, question
   │
-  ├─ File Loader ────────────► pandas.DataFrame
+  ├─ [START event] run_id, file, question, provider, model
   │
-  ├─ Schema Extractor ───────► Schema String
-  │                               │
-  │                               ├─ Column Names
-  │                               ├─ Data Types
-  │                               ├─ Sample Rows
-  │                               └─ Row Count
+  ├─ FileLoaderContext ──────────────────► pandas.DataFrame
+  │   [FILE_LOADED event] shape
   │
-  ├─ SQL Generator ─────┐
-  │   (LLM)              │
-  │                      ├──► SQL Query String
-  │                      │
-  │                  ┌───┴────────┐
-  │                  │   Failure? │
-  │                  └─────┬──────┘
-  │                        │ Yes
-  │              Error Recovery (Retry)
-  │                    max_retries=3
+  ├─ SchemaExtractor ────────────────────► Schema String
+  │   [SCHEMA_EXTRACTED event] schema_length   (columns, types, samples)
   │
-  └─ SQL Executor ──────────► Result DataFrame
-         (DuckDB)                 │
-                                  ├─ Rows
-                                  ├─ Columns
-                                  └─ Data
-                                      │
-                           Result Formatter
-                                      │
-                           JSON Response
-                                      │
-                           Claude Desktop
-
-Output: JSON with generated_sql, result_preview, row_count
+  ├─ SqlGenerator ───────────────────────► SQL String
+  │   [SQL_GENERATED event] sql (truncated)
+  │
+  ├─ retry_with_recovery()
+  │   ├─ Attempt 1: ExecuteHandler
+  │   │   ├─ Success ──────────────────► result DataFrame
+  │   │   │   [SQL_EXECUTED event] row_count, attempt=1
+  │   │   └─ Failure
+  │   │         ▼
+  │   │       CorrectionHandler (LLM corrects SQL)
+  │   │         [SQL_CORRECTED event] original_sql, corrected_sql
+  │   │         ▼
+  │   ├─ Attempt 2: ExecuteHandler (with corrected SQL)
+  │   │   ├─ Success ──────────────────► result DataFrame
+  │   │   └─ ... (up to MAX_SQL_RETRIES)
+  │   └─ ExhaustedHandler → raises
+  │
+  ├─ [COMPLETE event] row_count, latency_ms
+  │   OR [ERROR event] error, error_type, latency_ms
+  │
+Output: {"success", "generated_sql", "result_preview", "row_count", "total_columns"}
 ```
 
-## State Management
+---
 
-The system is **stateless**:
+## Observability Layer
 
-- No persistent state between calls
-- Each query is independent
-- No connection pooling
-- Fresh DataFrames for each query
-- DuckDB in-memory connections
+The MCP server process is killed when Claude Desktop exits — all in-memory state is lost. Observability is therefore written to **persistent storage with immediate flush**.
 
-## Error Handling Strategy
+### Event Stages
 
+| Stage | Emitted When | Key Data |
+|---|---|---|
+| `start` | `execute()` begins | run_id, file, question, provider, model |
+| `file_loaded` | File parsed into DataFrame | run_id, shape |
+| `schema_extracted` | Schema string built | run_id, schema_length |
+| `sql_generated` | LLM produced SQL | run_id, sql (truncated) |
+| `sql_corrected` | CorrectionHandler ran | run_id, original_sql, corrected_sql |
+| `sql_executed` | SQL ran successfully | run_id, row_count, attempt, sql_was_corrected |
+| `complete` | Pipeline finished | run_id, row_count, latency_ms |
+| `error` | Unhandled exception | run_id, error, error_type, latency_ms |
+
+### JSONL Log (`~/.mcpflux/events.jsonl`)
+Line format:
+```json
+{"ts": "2026-03-14T01:20:00Z", "stage": "sql_corrected", "data": {"run_id": "...", "attempt": 2, "error": "...", "corrected_sql": "SELECT ..."}}
 ```
-Try SQL Execution
-    │
-    ├─ Success ─────────► Return Results
-    │
-    └─ Failure
-        │
-        ├─ Retry 1/3 with LLM correction
-        │   │
-        │   ├─ Success ─► Return Results
-        │   │
-        │   └─ Failure
-        │       │
-        │       ├─ Retry 2/3
-        │       │   │
-        │       │   ├─ Success ─► Return Results
-        │       │   │
-        │       │   └─ Failure
-        │       │       │
-        │       │       └─ Retry 3/3
-        │       │           │
-        │       │           ├─ Success ─► Return Results
-        │       │           │
-        │       │           └─ Failure ──► Error Response
-        │       │
-        │       └─ [Max retries exhausted]
-        │
-        └─ [Error message + type to user]
+Query examples:
+```bash
+# All events for one run
+cat ~/.mcpflux/events.jsonl | jq 'select(.data.run_id == "abc-123")'
+# All correction events
+cat ~/.mcpflux/events.jsonl | jq 'select(.stage == "sql_corrected")'
 ```
+
+### SQLite Metrics (`~/.mcpflux/metrics.db`)
+Schema:
+```sql
+CREATE TABLE pipeline_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT, ts TEXT, file_path TEXT, question TEXT,
+    provider TEXT, model TEXT,
+    success INTEGER,     -- 1 or 0
+    attempts INTEGER,    -- which attempt succeeded
+    corrections INTEGER, -- how many LLM SQL corrections
+    latency_ms INTEGER,
+    error TEXT           -- NULL on success
+);
+```
+Query examples:
+```sql
+-- Success rate by provider
+SELECT provider, AVG(success)*100 FROM pipeline_runs GROUP BY provider;
+-- Average SQL corrections for successful runs
+SELECT AVG(corrections) FROM pipeline_runs WHERE success=1;
+-- Slowest queries
+SELECT question, latency_ms FROM pipeline_runs ORDER BY latency_ms DESC LIMIT 10;
+```
+
+---
 
 ## Configuration Hierarchy
 
 ```
-config.py (defaults)
+Defaults in config.py
     │
-    ├─ Environment Variables (override)
-    │   │
-    │   ├─ OPENAI_API_KEY
-    │   ├─ MODEL_NAME
-    │   ├─ MAX_SQL_RETRIES
-    │   └─ MAX_SAMPLE_ROWS
-    │
-    └─ Runtime Parameters (override)
-        (passed to functions)
+    └─ Environment Variables (override, loaded from .env via dotenv)
+        ├─ ANTHROPIC_API_KEY      (required)
+        ├─ LLM_PROVIDER           (default: "anthropic")
+        ├─ MODEL_NAME             (default: "claude-haiku-4-5")
+        ├─ OPENAI_API_KEY         (if using OpenAI provider)
+        ├─ EVENTS_LOG_PATH        (default: ~/.mcpflux/events.jsonl)
+        ├─ METRICS_DB_PATH        (default: ~/.mcpflux/metrics.db)
+        ├─ LANGCHAIN_TRACING_V2   (optional LangSmith)
+        ├─ LANGCHAIN_API_KEY      (optional LangSmith)
+        ├─ LANGSMITH_PROJECT      (optional LangSmith)
+        ├─ MAX_SQL_RETRIES        (default: 3)
+        ├─ MAX_SAMPLE_ROWS        (default: 5)
+        └─ MAX_RESULT_ROWS        (default: 100)
 ```
-
-## LLM Integration Points
-
-### 1. SQL Generation
-
-```
-Input:  schema + question
-Process: Call OpenAI API with prompt
-Output: SQL query string
-```
-
-### 2. Error Recovery
-
-```
-Input:  schema + broken_sql + error_message
-Process: Call OpenAI API to fix SQL
-Output: Corrected SQL query string
-```
-
-## Type System
-
-### Input Types
-
-```python
-file_path: str                    # Absolute or relative path
-question: str                     # Natural language query
-```
-
-### Internal Types
-
-```python
-df: pd.DataFrame                  # Loaded data
-schema: str                       # Formatted schema
-sql: str                         # SQL query
-result: pd.DataFrame            # Query results
-```
-
-### Output Types
-
-```python
-{
-  "success": bool,
-  "generated_sql": str,
-  "result_preview": list[dict],
-  "row_count": int,
-  "total_columns": int,
-  # OR on error:
-  "error": str,
-  "error_type": str
-}
-```
-
-## Performance Considerations
-
-### Time Breakdown
-
-```
-File Loading:        < 1s   (0.1s for CSV, 0.5s for Excel)
-Schema Extraction:   < 100ms
-LLM SQL Generation:  1-2s   (API latency)
-SQL Execution:       < 100ms (DuckDB is fast)
-Error Recovery:      2-3s   (if needed)
-────────────────────────────
-Total Latency:       2-6s typical
-```
-
-### Memory Usage
-
-```
-Small files (<10MB):      < 100MB RAM
-Medium files (100MB):     ~500MB RAM
-Large files (1GB):        ~2-5GB RAM
-```
-
-## Concurrency & Thread Safety
-
-Currently **single-threaded**:
-
-- MCP server handles one request at a time
-- No shared state between requests
-- Thread-safe libraries (pandas, duckdb)
-
-For scaling:
-
-- Add async/await support
-- Use connection pooling for DuckDB
-- Implement request queue
-
-## Database Schema
-
-The system registers DataFrames as a single table:
-
-```
-Table Name: "data"
-Columns:    [from input file]
-Rows:       [from input file]
-```
-
-Example with sales.csv:
-
-```
-Table: data
-
-Columns:
-- product (string)
-- country (string)
-- revenue (integer)
-- date (string)
-
-Row Count: 10
-
-Sample:
-product     country    revenue    date
-Widget A    USA        5000       2024-01-01
-Widget B    USA        3000       2024-01-01
-...
-```
-
-## Security Architecture
-
-### Data Isolation
-
-- ✅ Local processing only
-- ✅ No data sent to external services except:
-  - Schema info to LLM (for SQL generation)
-  - Question text to LLM
-- ✅ Results computed locally
-
-### API Key Management
-
-- ⚠️ Stored in environment variable
-- ⚠️ Not logged or transmitted
-- ⚠️ Should be restricted in OpenAI dashboard
-
-### Query Safety
-
-- ✅ SQL executed in isolated DuckDB session
-- ✅ No persistence between queries
-- ✅ Memory-only execution
-
-## Logging Architecture
-
-```
-Logger Hierarchy:
-    root logger
-    │
-    ├── spreadsheet_mcp_agent.server
-    │   └── Logs: orchestration, pipeline steps
-    │
-    ├── spreadsheet_mcp_agent.file_loader
-    │   └── Logs: file operations
-    │
-    ├── spreadsheet_mcp_agent.schema_extractor
-    │   └── Logs: schema extraction
-    │
-    ├── spreadsheet_mcp_agent.sql_generator
-    │   └── Logs: SQL generation
-    │
-    ├── spreadsheet_mcp_agent.sql_executor
-    │   └── Logs: SQL execution
-    │
-    ├── spreadsheet_mcp_agent.error_recovery
-    │   └── Logs: retry attempts
-    │
-    └── spreadsheet_mcp_agent.llm_client
-        └── Logs: LLM API calls
-```
-
-## Integration Points
-
-### With Claude Desktop
-
-```
-MCP Protocol (stdio)
-    ↔ query_spreadsheet tool
-    ↔ Structured inputs/outputs
-    ↔ JSON responses
-```
-
-### With External Services
-
-```
-OpenAI API
-    ← Model name, API key
-    ← Prompts (schema + question)
-    → SQL queries
-    → Error corrections
-```
-
-### With File System
-
-```
-Read Operations:
-    → Load CSV/Excel files
-    ← DataFrame contents
-```
-
-## Extensibility Points
-
-### Add New File Formats
-
-Edit `file_loader.py`:
-
-```python
-elif file_suffix == ".parquet":
-    df = pd.read_parquet(file_path)
-```
-
-### Add New LLM Providers
-
-Extend `llm_client.py`:
-
-```python
-class AnthropicClient(LLMClient):
-    def generate_text(self, prompt):
-        # Claude API implementation
-```
-
-### Add Database Support
-
-Extend `sql_executor.py`:
-
-```python
-def execute_sql_postgres(sql, conn_string):
-    # Direct database execution
-```
-
-### Add Result Post-Processing
-
-Extend `server.py`:
-
-```python
-def format_results(df):
-    # Custom formatting
-```
-
-## Testing Architecture
-
-### Unit Tests (suggested)
-
-```
-test_file_loader.py
-    - Test CSV loading
-    - Test Excel loading
-    - Test error cases
-
-test_schema_extractor.py
-    - Test schema formatting
-    - Test various data types
-
-test_sql_generator.py
-    - Test prompt generation
-    - Test markdown cleanup
-
-test_sql_executor.py
-    - Test SQL execution
-    - Test error handling
-
-test_error_recovery.py
-    - Test retry logic
-    - Test SQL correction
-```
-
-### Integration Tests (suggested)
-
-```
-test_end_to_end.py
-    - Full pipeline test
-    - Various query types
-    - Error scenarios
-```
-
-## Deployment Architecture
-
-### Single Machine
-
-```
-Python Process
-    └── MCP Server
-        └── Stdio to Claude
-```
-
-### With Process Manager (recommended)
-
-```
-Systemd/Supervisor
-    └── Python Process
-        └── MCP Server
-            └── Stdio to Claude
-```
-
-### With Load Balancer (future)
-
-```
-Claude Desktop (1)  ┐
-Claude Desktop (2)  ├─► Load Balancer ─► Server Pool
-Claude Desktop (N)  ┘
-```
-
-## Version Control
-
-```
-git
-├── .gitignore
-│   ├── .venv/
-│   ├── .env
-│   ├── *.pyc
-│   └── __pycache__/
-│
-└── tracked files
-    ├── Code (*.py)
-    ├── Config (pyproject.toml)
-    ├── Docs (*.md)
-    └── Requirements (requirements.txt)
-```
-
-## Code Organization Principles
-
-1. **Separation of Concerns**: Each module has one responsibility
-2. **DRY (Don't Repeat Yourself)**: Common logic in llm_client, config
-3. **SOLID Principles**:
-   - Single Responsibility: Each function does one thing
-   - Open/Closed: Easy to extend, hard to modify
-   - Liskov Substitution: Consistent interfaces
-   - Interface Segregation: Small, focused functions
-   - Dependency Inversion: Depend on abstractions (config)
-
-4. **Clean Code**:
-   - Meaningful names
-   - Short functions
-   - Comprehensive documentation
-   - Error handling throughout
-
-## Future Enhancements
-
-### Planned Features
-
-- [ ] Support for multiple tables/sheets
-- [ ] Query caching
-- [ ] Result visualization
-- [ ] Query history
-- [ ] User authentication
-- [ ] Rate limiting
-- [ ] Batch query processing
-- [ ] Database connectors (PostgreSQL, MySQL)
-
-### Performance Improvements
-
-- [ ] Async LLM calls
-- [ ] Connection pooling
-- [ ] Result streaming
-- [ ] Query optimization
-
-### Reliability
-
-- [ ] Circuit breaker for LLM
-- [ ] Request timeout handling
-- [ ] Graceful degradation
-- [ ] Health checks
 
 ---
 
-This architecture is designed for:
+## State Management
 
-- ✅ Production use
-- ✅ Easy maintenance
-- ✅ Clear extensibility
-- ✅ Comprehensive error handling
-- ✅ Performance and reliability
+Each `execute()` call is stateless from the caller's perspective:
+- `run_id` is local to the call; observers use it for correlation
+- No DataFrames cached between calls
+- DuckDB connections are in-memory per execution
+- `SqliteObserver` accumulates in-memory state within a run but flushes to disk on completion
+
+---
+
+## Error Handling
+
+```
+execute() try/except:
+    ├─ File not found → FileNotFoundError → ERROR event + re-raise
+    ├─ Unsupported format → ValueError → ERROR event + re-raise
+    ├─ SQL generation failure → RuntimeError → ERROR event + re-raise
+    └─ SQL exhausted → RuntimeError → ERROR event + re-raise
+
+Each ERROR event includes: run_id, error message, error_type, latency_ms
+The server.py handler catches all exceptions and returns JSON {"success": false, ...}
+```
+
+---
+
+## LLM Integration Points
+
+### 1. SQL Generation (`sql_generator.py` + `providers.py`)
+```
+Input:  schema + question
+LLM:    Prompted to return only a SQL SELECT statement
+Output: SQL string (markdown fences stripped)
+```
+
+### 2. SQL Correction (`handlers.py` — CorrectionHandler)
+```
+Input:  schema + broken_sql + error_message
+LLM:    Prompted to return only the corrected SQL
+Output: Corrected SQL string
+```
+Both use LangChain `PromptTemplate | LLM | StrOutputParser` chains, which are auto-traced by LangSmith when enabled.
+
+---
+
+## Extensibility Points
+
+### Add a new file format
+Implement `FileLoaderStrategy` in `loaders.py` and register in `FileLoaderContext`:
+```python
+class ParquetLoaderStrategy(FileLoaderStrategy):
+    def load(self, path: str) -> pd.DataFrame:
+        return pd.read_parquet(path)
+```
+
+### Add a new LLM provider
+Implement `LLMProvider` in `providers.py` and add a case to `get_provider()`:
+```python
+class MistralProvider(LLMProvider):
+    def get_runnable(self): ...
+```
+
+### Add a new observer
+Implement `PipelineObserver` in `events.py` and register in `server.py`:
+```python
+class SlackAlertObserver(PipelineObserver):
+    def on_event(self, event):
+        if event.stage == PipelineStage.ERROR:
+            send_slack(event.data["error"])
+```
+
+---
+
+## Security
+
+- Local processing only — data does not leave the machine except:
+  - Schema info + question sent to LLM API for SQL generation
+  - Events/metrics sent to LangSmith if tracing is enabled
+- SQL execution is isolated in DuckDB in-memory session
+- API keys stored in environment variables / `.env` (never logged)
+- No persistence between queries (stateless DuckDB)
+
+---
+
+## Performance
+
+| Stage | Typical Latency |
+|---|---|
+| File loading | < 1s (CSV), < 2s (Excel) |
+| Schema extraction | < 100ms |
+| LLM SQL generation | 0.5–2s |
+| SQL execution (DuckDB) | < 100ms |
+| LLM SQL correction (if needed) | +0.5–2s per attempt |
+| Observer writes (JSONL + SQLite) | < 5ms per event |
+
+---
+
+## Future Enhancements
+
+- [ ] Async LLM calls for lower latency
+- [ ] Multi-sheet Excel support
+- [ ] Query result caching
+- [ ] Streaming result support
+- [ ] Health check endpoint (HTTP mode)
+- [ ] PostgreSQL / MySQL connector support
+- [ ] Dashboard for SQLite metrics

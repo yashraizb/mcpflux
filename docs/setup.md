@@ -4,293 +4,263 @@
 
 ## Prerequisites
 
-- Python 3.9 or higher
-- OpenAI API key (get one at https://platform.openai.com/api-keys)
-- pip or uv package manager
+- Python 3.10 or higher
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- Anthropic API key (default provider) — [console.anthropic.com](https://console.anthropic.com)
+- Optional: OpenAI API key or Google API key for alternate providers
 
-## Installation Steps
+---
 
-### 1. Clone or Download the Project
+## Installation
+
+### 1. Navigate to the project
 
 ```bash
 cd /path/to/mcpflux
 ```
 
-### 2. Create a Virtual Environment (Recommended)
+### 2. Install dependencies
 
-Using venv:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scriptsctivate
-```
-
-Using uv:
+Using uv (recommended — handles virtualenv automatically):
 
 ```bash
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scriptsctivate
+uv sync
 ```
 
-### 3. Install Dependencies
+Using pip:
 
 ```bash
-# Using pip
-pip install -r spreadsheet_mcp_agent/requirements.txt
-
-# OR using uv
-uv pip install -r spreadsheet_mcp_agent/requirements.txt
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-### 4. Set Up Environment Variables
-
-Copy the example file:
+### 3. Set up environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and add your OpenAI API key:
+Edit `.env`:
 
 ```bash
-OPENAI_API_KEY=sk-your-api-key-here
+# Required
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Optional: choose a different LLM provider
+# LLM_PROVIDER=openai
+# MODEL_NAME=gpt-4o-mini
+# OPENAI_API_KEY=sk-your-openai-key
+
+# Optional: LangSmith tracing (free tier at smith.langchain.com)
+# LANGCHAIN_TRACING_V2=true
+# LANGCHAIN_API_KEY=ls__your-key
+# LANGSMITH_PROJECT=mcpflux
+
+# Optional: custom paths for observability data
+# EVENTS_LOG_PATH=~/.mcpflux/events.jsonl
+# METRICS_DB_PATH=~/.mcpflux/metrics.db
 ```
 
-You can also set it in your shell:
+### 4. Verify installation
 
 ```bash
-export OPENAI_API_KEY="sk-your-api-key-here"
+uv run python -c "from spreadsheet_mcp_agent import run_server; print('OK')"
 ```
 
-### 5. Verify Installation
-
-Test that everything is working:
-
-```bash
-python main.py
+Expected output:
+```
+JsonlObserver writing to /Users/yourname/.mcpflux/events.jsonl
+SqliteObserver writing to /Users/yourname/.mcpflux/metrics.db
+OK
 ```
 
-You should see:
+---
 
-```
-Starting Spreadsheet MCP Agent...
-```
-
-Press Ctrl+C to stop the server.
-
-## Integration with Claude Desktop
+## Claude Desktop Integration
 
 ### Mac
 
-1. Open Claude Desktop settings
-2. Look for "Developer" settings
-3. Add or edit the MCP servers configuration
-4. Add this entry:
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
-	"mcpServers": {
-		"spreadsheet_agent": {
-			"command": "python",
-			"args": ["/absolute/path/to/mcpflux/main.py"],
-			"env": {
-				"OPENAI_API_KEY": "sk-your-api-key"
-			}
-		}
-	}
+  "mcpServers": {
+    "spreadsheet-query-agent": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/mcpflux", "run", "python", "main.py"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-your-key"
+      }
+    }
+  }
 }
 ```
 
 ### Windows
 
-Similar to Mac, but use the Windows path format and ensure Python is in PATH:
+Config location: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
-	"mcpServers": {
-		"spreadsheet_agent": {
-			"command": "python",
-			"args": ["C:\path\to\mcpflux\main.py"],
-			"env": {
-				"OPENAI_API_KEY": "sk-your-api-key"
-			}
-		}
-	}
+  "mcpServers": {
+    "spreadsheet-query-agent": {
+      "command": "uv",
+      "args": ["--directory", "C:\\path\\to\\mcpflux", "run", "python", "main.py"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-your-key"
+      }
+    }
+  }
 }
 ```
 
 ### Linux
 
+Config location: `~/.config/Claude/claude_desktop_config.json`
+
 ```json
 {
-	"mcpServers": {
-		"spreadsheet_agent": {
-			"command": "python",
-			"args": ["/home/user/path/to/mcpflux/main.py"],
-			"env": {
-				"OPENAI_API_KEY": "sk-your-api-key"
-			}
-		}
-	}
+  "mcpServers": {
+    "spreadsheet-query-agent": {
+      "command": "uv",
+      "args": ["--directory", "/home/user/mcpflux", "run", "python", "main.py"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-your-key"
+      }
+    }
+  }
 }
 ```
 
+After editing, restart Claude Desktop completely.
+
+---
+
 ## Testing the Installation
 
-### Generate Example Data
+### Generate example data
 
 ```bash
-python generate_examples.py
+uv run python generate_examples.py
 ```
 
-This creates sample CSV files for testing.
+### Run a query
 
-### Run a Quick Test
-
-```bash
-python -c "
+```python
+from spreadsheet_mcp_agent.facade import SpreadsheetQueryFacade
 import json
-from spreadsheet_mcp_agent import query_spreadsheet
 
-# Create or use existing CSV file
-result = query_spreadsheet('sales_data.csv', 'What is the total revenue?')
-print(json.dumps(json.loads(result), indent=2))
-"
+facade = SpreadsheetQueryFacade()
+result = facade.execute("sales_data.csv", "What is the total revenue?")
+print(json.dumps(result, indent=2))
 ```
 
-## Using the Server
+---
 
-### Command Line Testing
+## Configuration Reference
 
-```bash
-# Start the server
-python main.py
+| Variable | Default | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | — | **Required**. Anthropic API key |
+| `LLM_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `openai`, `google` |
+| `MODEL_NAME` | `claude-haiku-4-5` | Model name for chosen provider |
+| `OPENAI_API_KEY` | — | Required if `LLM_PROVIDER=openai` |
+| `EVENTS_LOG_PATH` | `~/.mcpflux/events.jsonl` | Path for JSONL event log |
+| `METRICS_DB_PATH` | `~/.mcpflux/metrics.db` | Path for SQLite metrics DB |
+| `LANGCHAIN_TRACING_V2` | — | Set `true` for LangSmith tracing |
+| `LANGCHAIN_API_KEY` | — | LangSmith API key |
+| `LANGSMITH_PROJECT` | — | LangSmith project name |
+| `MAX_SQL_RETRIES` | `3` | Max LLM SQL correction attempts |
+| `MAX_SAMPLE_ROWS` | `5` | Rows in schema sample sent to LLM |
+| `MAX_RESULT_ROWS` | `100` | Max rows returned in result |
 
-# In another terminal, you can send requests via Claude Desktop
-```
-
-### With Claude Desktop
-
-1. Open Claude Desktop
-2. Upload a CSV or Excel file
-3. Ask a question like:
-   - "What's the total revenue by country?"
-   - "Show me the top 5 products"
-   - "Average revenue per product"
-
-4. Claude will automatically use the MCP server to query your data
+---
 
 ## Troubleshooting
 
-### "OPENAI_API_KEY not set" Error
+### "ANTHROPIC_API_KEY not set"
 
-**Solution**: Make sure you've set the API key:
-
+Set it in `.env` or export it:
 ```bash
-export OPENAI_API_KEY="sk-your-key"
-python main.py
+export ANTHROPIC_API_KEY="sk-ant-your-key"
 ```
 
-### "Module not found" Error
-
-**Solution**: Reinstall dependencies:
+### "Module not found"
 
 ```bash
-pip install --upgrade -r spreadsheet_mcp_agent/requirements.txt
+uv sync
 ```
 
-### "File not found" Error
+### "File not found" when querying
 
-**Solution**: Use absolute file paths:
-
-```bash
-python -c "
-from spreadsheet_mcp_agent import query_spreadsheet
-result = query_spreadsheet('/absolute/path/to/file.csv', 'Your question')
-"
-```
-
-### "Invalid SQL" Errors
-
-The server automatically attempts to fix SQL errors using the LLM. If this fails after 3 retries, check:
-
-1. File format is correct (CSV/XLSX)
-2. Column names don't have special characters
-3. Data types are valid (use pandas to inspect: `pd.read_csv('file.csv').dtypes`)
-
-### Claude Desktop Not Detecting Server
-
-1. Restart Claude Desktop
-2. Check that the server path is absolute (not relative)
-3. Verify Python is accessible: `which python` or `python --version`
-4. Check Claude Desktop logs for error messages
-
-## Configuration
-
-### Model Selection
-
-By default, the server uses `gpt-4o-mini`. To use a different model:
-
-```bash
-export MODEL_NAME="gpt-4-turbo"
-python main.py
-```
-
-Or edit `spreadsheet_mcp_agent/config.py`:
-
+Use absolute file paths:
 ```python
-MODEL_NAME = "gpt-4-turbo"  # Change this
+facade.execute("/Users/me/data/sales.csv", "Your question")
 ```
 
-### Adjust Retry Attempts
+### Claude Desktop not detecting the server
 
-Edit `spreadsheet_mcp_agent/config.py`:
+1. Restart Claude Desktop completely (Cmd+Q on Mac)
+2. Verify the path in `claude_desktop_config.json` is absolute
+3. Test that `uv` is in PATH: `which uv`
+4. Check Claude Desktop logs for errors
 
-```python
-MAX_SQL_RETRIES = 5  # Increase from 3 to 5
-```
+### SQL errors
 
-### Result Limit
+The server automatically retries with LLM correction (up to `MAX_SQL_RETRIES` times). If still failing:
+- Inspect `~/.mcpflux/events.jsonl` for correction details
+- Check column names don't contain special characters
+- Increase `MAX_SQL_RETRIES` in `.env`
 
-Change how many rows are returned:
-
-```python
-MAX_RESULT_ROWS = 500  # Increase from 100 to 500
-```
+---
 
 ## Advanced Usage
 
-### Debugging
+### Use a different LLM provider
 
-Enable debug logging:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
-from spreadsheet_mcp_agent import query_spreadsheet
-result = query_spreadsheet('file.csv', 'question')
+```bash
+LLM_PROVIDER=openai
+MODEL_NAME=gpt-4o
+OPENAI_API_KEY=sk-...
 ```
 
-### Custom LLM Prompts
+### Enable LangSmith tracing
 
-Edit `spreadsheet_mcp_agent/sql_generator.py` to customize how questions are converted to SQL.
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=ls__...
+LANGSMITH_PROJECT=mcpflux
+```
 
-### Schema Customization
+Then view traces at [smith.langchain.com](https://smith.langchain.com).
 
-Modify `spreadsheet_mcp_agent/schema_extractor.py` to change what schema information is sent to the LLM.
+### Register a custom observer
 
-## Performance Tips
+```python
+from spreadsheet_mcp_agent.events import PipelineObserver, PipelineEvent, PipelineStage
+from spreadsheet_mcp_agent.facade import SpreadsheetQueryFacade
 
-1. **Large Files**: DuckDB can handle millions of rows, but may slow down with >10GB datasets
-2. **Complex Queries**: The LLM works better with natural language descriptions
-3. **Column Names**: Use clear, descriptive column names (e.g., "customer_revenue" not "cr")
+class SlackObserver(PipelineObserver):
+    def on_event(self, event: PipelineEvent) -> None:
+        if event.stage == PipelineStage.ERROR:
+            # send_slack(event.data["error"])
+            pass
+
+facade = SpreadsheetQueryFacade(observers=[SlackObserver()])
+```
+
+### Increase result rows
+
+```bash
+MAX_RESULT_ROWS=500
+```
+
+---
 
 ## Support
 
-For detailed documentation, see:
-
-- [Main README](README.md)
-- [Module Documentation](spreadsheet_mcp_agent/README.md)
-- [OpenAI Documentation](https://platform.openai.com/docs)
-- [DuckDB Documentation](https://duckdb.org)
+- [Getting Started](getting-started.md)
+- [Quick Reference](quick-reference.md)
+- [Architecture](architecture.md)
+- [Claude Desktop Integration](claude-integration.md)

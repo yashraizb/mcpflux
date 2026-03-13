@@ -1,427 +1,181 @@
 [← Back to Contents](../README.md#documentation)
 
-# Complete Codebase Index
+# Codebase File Index
 
-## 📦 Project Structure
+## Project Structure
 
 ```
-mcpflux/                                    (root directory)
+mcpflux/
 │
-├── 📋 DOCUMENTATION
-│   ├── README.md                           (Main overview & features)
-│   ├── SETUP.md                            (Installation guide)
-│   ├── QUICK_REFERENCE.md                  (Quick command reference)
-│   ├── CLAUDE_INTEGRATION.md               (Claude Desktop setup)
-│   ├── ARCHITECTURE.md                     (System design docs)
-│   ├── DEPLOYMENT_CHECKLIST.md             (Pre-deployment items)
-│   ├── IMPLEMENTATION_SUMMARY.md           (What was built)
-│   └── FILES_INDEX.md                      (This file)
+├── README.md                        Main overview, quick start, API format
+├── main.py                          Server entry point (imports run_server)
+├── pyproject.toml                   Project metadata, dependencies, build config
+├── .env.example                     Environment variable template
+├── generate_examples.py             Creates sample CSV files for testing
 │
-├── 🔧 CONFIGURATION
-│   ├── pyproject.toml                      (Project metadata & deps)
-│   ├── .env.example                        (Environment template)
-│   └── main.py                             (Server entry point)
+├── docs/
+│   ├── getting-started.md           5-minute install and first query
+│   ├── setup.md                     Detailed installation and configuration
+│   ├── quick-reference.md           Config vars, commands, common queries
+│   ├── claude-integration.md        Claude Desktop setup on Mac/Windows/Linux
+│   ├── architecture.md              System design, patterns, data flow
+│   ├── files-index.md               This file
+│   ├── implementation-summary.md    What was built and how it works
+│   ├── documentation-index.md       Learning paths by use case
+│   ├── deployment-checklist.md      Pre-deployment verification
+│   ├── project-checklist.md         Deliverables and features checklist
+│   ├── project-complete.md          Completion summary
+│   └── delivery-summary.md          High-level overview
 │
-├── 🎯 UTILITIES
-│   └── generate_examples.py                (Create sample data)
-│
-└── 📦 PACKAGE: spreadsheet_mcp_agent/
-    ├── __init__.py                         (Package exports)
+└── spreadsheet_mcp_agent/
+    ├── __init__.py                  Package exports (run_server)
     │
-    ├── 🔌 CORE MODULES
-    │   ├── server.py                       (MCP server & orchestrator)
-    │   ├── config.py                       (Configuration management)
-    │   └── llm_client.py                   (OpenAI API wrapper)
-    │
-    ├── 📥 DATA PROCESSING
-    │   ├── file_loader.py                  (CSV/Excel loader)
-    │   └── schema_extractor.py             (Schema extraction)
-    │
-    ├── 🔍 SQL PIPELINE
-    │   ├── sql_generator.py                (NLP → SQL conversion)
-    │   ├── sql_executor.py                 (DuckDB executor)
-    │   └── error_recovery.py               (Retry & recovery logic)
-    │
-    ├── 📚 DOCUMENTATION
-    │   └── README.md                       (Module-level docs)
-    │
-    ├── 🧪 EXAMPLES
-    │   └── example.py                      (Usage examples)
-    │
-    └── 📋 DEPENDENCIES
-        └── requirements.txt                (Python packages)
+    ├── server.py                    MCP server adapter
+    ├── facade.py                    Pipeline orchestrator (Facade pattern)
+    ├── events.py                    Observer pattern: events + all observers
+    ├── handlers.py                  SQL retry chain (Chain of Responsibility)
+    ├── providers.py                 LLM provider abstraction (Strategy)
+    ├── loaders.py                   File format loaders (Strategy)
+    ├── config.py                    Configuration dataclass + env vars
+    ├── schema_extractor.py          DataFrame → LLM-friendly schema string
+    ├── sql_generator.py             NLP question → SQL
+    ├── sql_executor.py              DuckDB SQL execution
+    ├── llm_client.py                Low-level LLM API wrapper
+    ├── error_recovery.py            Legacy recovery helpers
+    └── example.py                   Usage examples and local test
 ```
-
-## 📄 File Descriptions
-
-### Core Application Files
-
-#### `main.py` (14 lines)
-
-- **Purpose**: Server entry point for MCP
-- **Key Function**: Imports and runs the MCP server
-- **Usage**: `python main.py`
-- **Status**: Production-ready
-
-#### `spreadsheet_mcp_agent/server.py` (~60 lines)
-
-- **Purpose**: Main MCP server implementation
-- **Key Function**: `query_spreadsheet(file_path, question)`
-- **Responsibilities**:
-  - Orchestrates the entire pipeline
-  - Loads files → extracts schema → generates SQL → executes → formats results
-  - Handles JSON response formatting
-  - Error handling and logging
-- **Type Safety**: Full type hints
-- **Status**: Production-ready
-
-#### `spreadsheet_mcp_agent/config.py` (~40 lines)
-
-- **Purpose**: Centralized configuration
-- **Key Class**: `Config` dataclass
-- **Settings**:
-  - `MODEL_NAME`: LLM model (default: gpt-4o-mini)
-  - `MAX_SQL_RETRIES`: Retry attempts (default: 3)
-  - `MAX_SAMPLE_ROWS`: Schema sample size (default: 5)
-  - `MAX_RESULT_ROWS`: Result limit (default: 100)
-- **Features**:
-  - Environment variable support
-  - Configuration validation
-  - Global instance: `config`
-- **Status**: Production-ready
-
-#### `spreadsheet_mcp_agent/llm_client.py` (~60 lines)
-
-- **Purpose**: OpenAI API integration
-- **Key Classes**:
-  - `LLMClient`: Wrapper for API calls
-- **Key Functions**:
-  - `generate_text(prompt)`: Send prompt to LLM
-  - `LLMClient.__init__()`: Initialize with API key & model
-- **Features**:
-  - Configurable model selection
-  - Error handling with retry
-  - Logging of API calls
-  - Uses `openai` library
-- **Status**: Production-ready
-
-### Data Processing Modules
-
-#### `spreadsheet_mcp_agent/file_loader.py` (~45 lines)
-
-- **Purpose**: Load data files
-- **Key Function**: `load_file(file_path) -> pd.DataFrame`
-- **Supported Formats**:
-  - CSV (.csv)
-  - Excel (.xlsx)
-  - Excel 97 (.xls)
-- **Error Handling**:
-  - File not found
-  - Unsupported format
-  - Read errors
-- **Status**: Production-ready
-
-#### `spreadsheet_mcp_agent/schema_extractor.py` (~75 lines)
-
-- **Purpose**: Extract DataFrame metadata
-- **Key Function**: `extract_schema(df) -> str`
-- **Extracts**:
-  - Column names
-  - Data types
-  - First 5 sample rows
-  - Total row count
-- **Helper Functions**:
-  - `get_column_names(df)`: List of columns
-  - `get_column_types(df)`: Column type mapping
-  - `get_row_count(df)`: Row count
-- **Output**: LLM-friendly schema string
-- **Status**: Production-ready
-
-### SQL Processing Modules
-
-#### `spreadsheet_mcp_agent/sql_generator.py` (~60 lines)
-
-- **Purpose**: Convert questions to SQL
-- **Key Function**: `generate_sql(schema, question) -> str`
-- **Process**:
-  1. Craft LLM prompt with schema
-  2. Send question + schema to LLM
-  3. Clean markdown from response
-  4. Return SQL query
-- **Helper Function**: `extract_sql_from_response(response)`
-- **Status**: Production-ready
-
-#### `spreadsheet_mcp_agent/sql_executor.py` (~50 lines)
-
-- **Purpose**: Execute SQL on DataFrames
-- **Key Function**: `execute_sql(df, sql) -> pd.DataFrame`
-- **Process**:
-  1. Create DuckDB in-memory connection
-  2. Register DataFrame as "data" table
-  3. Execute SQL query
-  4. Return results as DataFrame
-- **Helper Function**: `validate_sql(sql) -> bool`
-- **Status**: Production-ready
-
-#### `spreadsheet_mcp_agent/error_recovery.py` (~90 lines)
-
-- **Purpose**: Automatic error recovery
-- **Key Functions**:
-  - `recover_from_sql_error()`: Fix broken SQL with LLM
-  - `retry_with_recovery()`: Execute with automatic retry
-- **Process**:
-  1. Try to execute SQL
-  2. If fails: send SQL + error to LLM
-  3. LLM suggests fix
-  4. Retry (up to 3 times)
-- **Status**: Production-ready
-
-### Example & Test Files
-
-#### `spreadsheet_mcp_agent/example.py` (~50 lines)
-
-- **Purpose**: Example usage and testing
-- **Key Functions**:
-  - `create_sample_csv()`: Generate test data
-  - `main()`: Run example queries
-- **Usage**: `python spreadsheet_mcp_agent/example.py`
-- **Status**: Ready for reference
-
-#### `generate_examples.py` (~50 lines)
-
-- **Purpose**: Create sample datasets
-- **Key Functions**:
-  - `create_sales_data()`: Generate sales.csv
-  - `create_customer_data()`: Generate customer_data.csv
-- **Usage**: `python generate_examples.py`
-- **Status**: Ready for testing
-
-### Documentation Files
-
-| File                            | Purpose                            | Lines |
-| ------------------------------- | ---------------------------------- | ----- |
-| README.md                       | Main overview, features, usage     | ~150  |
-| SETUP.md                        | Installation & configuration guide | ~200  |
-| QUICK_REFERENCE.md              | Quick commands & troubleshooting   | ~150  |
-| CLAUDE_INTEGRATION.md           | Claude Desktop setup steps         | ~200  |
-| ARCHITECTURE.md                 | System design & data flow          | ~400  |
-| DEPLOYMENT_CHECKLIST.md         | Pre-deployment verification        | ~150  |
-| IMPLEMENTATION_SUMMARY.md       | What was built overview            | ~200  |
-| spreadsheet_mcp_agent/README.md | Module documentation               | ~250  |
-
-### Configuration Files
-
-| File             | Purpose                                      |
-| ---------------- | -------------------------------------------- |
-| pyproject.toml   | Project metadata, dependencies, build config |
-| .env.example     | Template for environment variables           |
-| requirements.txt | pip-installable dependencies list            |
-
-## 📊 Code Statistics
-
-### Lines of Code
-
-```
-Core Application Code:
-  server.py               ~60 lines
-  config.py              ~40 lines
-  file_loader.py         ~45 lines
-  schema_extractor.py    ~75 lines
-  sql_generator.py       ~60 lines
-  sql_executor.py        ~50 lines
-  error_recovery.py      ~90 lines
-  llm_client.py          ~60 lines
-  ─────────────────────────────
-  Total Core Logic:      ~480 lines
-
-With Examples & Utils:
-  example.py             ~50 lines
-  generate_examples.py   ~50 lines
-  main.py                ~14 lines
-  ─────────────────────────────
-  Total Application:     ~594 lines
-
-Documentation:
-  All .md files          ~1,500 lines
-
-Total Project:          ~2,100 lines
-```
-
-### Type Safety
-
-- ✅ 100% of functions have type hints
-- ✅ Input and output types annotated
-- ✅ Return types specified
-- ✅ Parameter types documented
-
-### Documentation
-
-- ✅ Docstrings on all public functions
-- ✅ Module-level documentation
-- ✅ Comprehensive README
-- ✅ Setup and integration guides
-- ✅ Quick reference guide
-- ✅ Architecture documentation
-
-## 🔄 Dependencies
-
-### Core Dependencies
-
-```
-mcp              ≥0.1.0      (Model Context Protocol)
-fastmcp          ≥0.0.10     (FastMCP framework)
-pandas           ≥2.0.0      (Data manipulation)
-duckdb           ≥0.9.0      (SQL execution)
-openpyxl         ≥3.10.0     (Excel support)
-python-dotenv    ≥1.0.0      (Environment config)
-openai           ≥1.0.0      (LLM API)
-```
-
-### Optional Dependencies (for development)
-
-```
-pytest           ≥7.0.0      (Testing)
-black            ≥23.0.0     (Code formatting)
-mypy             ≥1.0.0      (Type checking)
-ruff             ≥0.0.250    (Linting)
-```
-
-## 🎯 Key Features by Module
-
-### File Loading (file_loader.py)
-
-✅ CSV support  
-✅ Excel support  
-✅ Error handling  
-✅ Path validation
-
-### Schema Extraction (schema_extractor.py)
-
-✅ Column extraction  
-✅ Type detection  
-✅ Sample rows  
-✅ Row counting  
-✅ LLM-friendly formatting
-
-### SQL Generation (sql_generator.py)
-
-✅ Natural language conversion  
-✅ LLM integration  
-✅ Markdown cleanup  
-✅ Prompt engineering
-
-### SQL Execution (sql_executor.py)
-
-✅ DuckDB integration  
-✅ DataFrame registration  
-✅ Error propagation  
-✅ In-memory execution
-
-### Error Recovery (error_recovery.py)
-
-✅ Automatic retries  
-✅ LLM-powered fixes  
-✅ Error analysis  
-✅ Configurable retry count
-
-### LLM Integration (llm_client.py)
-
-✅ OpenAI API  
-✅ Model selection  
-✅ Error handling  
-✅ API key management
-
-### Server (server.py)
-
-✅ MCP protocol  
-✅ Pipeline orchestration  
-✅ Logging  
-✅ Error handling  
-✅ JSON formatting
-
-## 📋 Usage Patterns
-
-### Basic Query
-
-```python
-from spreadsheet_mcp_agent import query_spreadsheet
-result = query_spreadsheet("file.csv", "Your question")
-```
-
-### With Configuration
-
-```python
-from spreadsheet_mcp_agent import config
-config.MODEL_NAME = "gpt-4"
-```
-
-### Running Server
-
-```bash
-python main.py
-```
-
-### With Claude Desktop
-
-1. Upload file
-2. Ask question
-3. Get results
-
-## ✨ Quality Metrics
-
-- **Type Coverage**: 100%
-- **Docstring Coverage**: 100% (public functions)
-- **Error Handling**: Comprehensive
-- **Logging**: Full coverage
-- **Code Organization**: Clean architecture
-- **Configuration**: Centralized
-- **Security**: API keys externalized
-- **Testing**: Example code provided
-
-## 🚀 Getting Started
-
-1. **Install**: See [SETUP.md](SETUP.md)
-2. **Configure**: Set OPENAI_API_KEY
-3. **Test**: Run `generate_examples.py`
-4. **Run**: `python main.py`
-5. **Integrate**: Follow [CLAUDE_INTEGRATION.md](CLAUDE_INTEGRATION.md)
-
-## 📞 Support
-
-- **Installation Issues**: See [SETUP.md](SETUP.md)
-- **Claude Integration**: See [CLAUDE_INTEGRATION.md](CLAUDE_INTEGRATION.md)
-- **Common Issues**: See [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- **Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Deployment**: See [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
-
-## 📦 What's Included
-
-✅ Complete MCP server implementation  
-✅ File loading (CSV/Excel)  
-✅ Schema extraction  
-✅ LLM SQL generation  
-✅ DuckDB SQL execution  
-✅ Error recovery with retries  
-✅ Configuration management  
-✅ Comprehensive logging  
-✅ Type hints throughout  
-✅ Full documentation  
-✅ Example code  
-✅ Setup guides  
-✅ Integration guide  
-✅ Architecture documentation  
-✅ Deployment checklist
-
-## 🎓 Learning Resources
-
-- **MCP Protocol**: https://modelcontextprotocol.io
-- **FastMCP**: https://github.com/jlowin/fastmcp
-- **DuckDB**: https://duckdb.org
-- **Pandas**: https://pandas.pydata.org
-- **OpenAI API**: https://platform.openai.com/docs
 
 ---
 
-**Total Implementation**: ~600 lines of core code + ~1,500 lines of documentation
-**Status**: ✅ Production-Ready
-**Last Updated**: March 2026
+## File Descriptions
+
+### Entry Points
+
+#### `main.py`
+- Calls `run_server()` from the package
+- Usage: `uv run python main.py`
+
+#### `spreadsheet_mcp_agent/__init__.py`
+- Exports: `run_server`
+
+---
+
+### Core Pipeline Modules
+
+#### `spreadsheet_mcp_agent/server.py`
+- **Pattern**: MCP adapter
+- **Responsibilities**: FastMCP setup, `@mcp.tool()` registration, observer wiring, `run_server()`
+- Instantiates `SpreadsheetQueryFacade` with `LoggingObserver`, `JsonlObserver`, `SqliteObserver`
+- Catches all exceptions and returns JSON error response
+
+#### `spreadsheet_mcp_agent/facade.py`
+- **Pattern**: Facade
+- **Key class**: `SpreadsheetQueryFacade`
+- **Key method**: `execute(file_path, question) -> dict`
+- Generates `run_id` (UUID4) per execution; tracks wall-clock timing
+- Calls private methods: `_load`, `_extract_schema`, `_generate_sql`, `_execute_sql`, `_format_result`
+- Notifies all observers at each stage via `_notify(stage, data)`
+- Emits `ERROR` event on unhandled exception
+
+#### `spreadsheet_mcp_agent/events.py`
+- **Pattern**: Observer
+- **`PipelineStage`**: Enum — START, FILE_LOADED, SCHEMA_EXTRACTED, SQL_GENERATED, SQL_CORRECTED, SQL_EXECUTED, COMPLETE, ERROR
+- **`PipelineEvent`**: Dataclass with `stage: PipelineStage` and `data: dict`
+- **`PipelineObserver`**: ABC with abstract `on_event(event)`
+- **`LoggingObserver`**: Logs to Python logger
+- **`MetricsObserver`**: Placeholder for push-based sinks
+- **`JsonlObserver`**: Appends JSON lines to `~/.mcpflux/events.jsonl`; immediate flush per write
+- **`SqliteObserver`**: Writes one row per completed run to `~/.mcpflux/metrics.db`; accumulates state in `self._runs` keyed by `run_id`
+
+#### `spreadsheet_mcp_agent/handlers.py`
+- **Pattern**: Chain of Responsibility
+- **`SqlContext`**: Dataclass — schema, sql, execute_func, max_retries, attempt, last_error, result, success
+- **`SqlHandler`**: ABC with `handle(ctx)` and `set_next(handler)`
+- **`ExecuteHandler`**: Calls `execute_func(ctx.sql)`, sets `ctx.success = True` on success
+- **`CorrectionHandler`**: On failure, builds a LangChain correction prompt, calls LLM, updates `ctx.sql`, increments `ctx.attempt`, re-triggers chain
+- **`ExhaustedHandler`**: Terminal handler — raises `RuntimeError` when retries exhausted
+- **`build_handler_chain(schema, execute_func, max_retries)`**: Factory
+- **`retry_with_recovery(schema, sql, execute_func, max_retries)`**: Public API
+
+#### `spreadsheet_mcp_agent/providers.py`
+- **Pattern**: Strategy
+- **`LLMProvider`**: ABC with `generate(prompt) -> str` and `get_runnable() -> Runnable`
+- **`AnthropicProvider`**: Claude via `langchain-anthropic`; default
+- **`OpenAIProvider`**: GPT via `langchain-openai`
+- **`GoogleProvider`**: Gemini via `langchain-google-genai` (placeholder)
+- **`get_provider() -> LLMProvider`**: Factory; reads `LLM_PROVIDER` env var
+
+#### `spreadsheet_mcp_agent/loaders.py`
+- **Pattern**: Strategy
+- **`FileLoaderStrategy`**: ABC with `load(path) -> pd.DataFrame`
+- **`CsvLoaderStrategy`**: `pd.read_csv()`
+- **`ExcelLoaderStrategy`**: `pd.read_excel()`
+- **`FileLoaderContext`**: Selects strategy by file extension; validates format and existence
+
+#### `spreadsheet_mcp_agent/config.py`
+- **`Config`**: Dataclass with all settings loaded from env vars
+- Settings: `LLM_PROVIDER`, `MODEL_NAME`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `EVENTS_LOG_PATH`, `METRICS_DB_PATH`, `MAX_SQL_RETRIES`, `MAX_SAMPLE_ROWS`, `MAX_RESULT_ROWS`, `ALLOWED_FILE_FORMATS`
+- `validate()`: Raises `ValueError` if `ANTHROPIC_API_KEY` is empty
+- Global instance: `config`
+
+---
+
+### Supporting Modules
+
+#### `spreadsheet_mcp_agent/schema_extractor.py`
+- **`extract_schema(df) -> str`**: Returns LLM-friendly string with column names, types, sample rows, row count
+
+#### `spreadsheet_mcp_agent/sql_generator.py`
+- **`generate_sql(schema, question) -> str`**: Builds a LangChain prompt with schema + question, calls the active provider, strips markdown fences from response
+
+#### `spreadsheet_mcp_agent/sql_executor.py`
+- **`execute_sql(df, sql) -> pd.DataFrame`**: Registers DataFrame as DuckDB `data` table; executes SQL; returns result DataFrame
+
+#### `spreadsheet_mcp_agent/llm_client.py`
+- Low-level LLM wrapper used by legacy code and `sql_generator.py`; handles retry on 529 (overloaded)
+
+#### `spreadsheet_mcp_agent/error_recovery.py`
+- Legacy error recovery helpers; superseded by `handlers.py` but retained for compatibility
+
+#### `spreadsheet_mcp_agent/file_loader.py`
+- Legacy file loader; superseded by `loaders.py` but retained for compatibility
+
+#### `spreadsheet_mcp_agent/example.py`
+- Standalone example: creates sample data, runs queries via facade, prints results
+
+---
+
+## Dependencies
+
+### Runtime
+
+| Package | Version | Purpose |
+|---|---|---|
+| `mcp` | ≥0.1.0 | Model Context Protocol |
+| `fastmcp` | ≥0.0.10 | MCP server framework |
+| `pandas` | ≥2.0.0 | Data manipulation |
+| `duckdb` | ≥0.9.0 | In-memory SQL execution |
+| `openpyxl` | ≥3.0.0 | Excel file support |
+| `python-dotenv` | ≥1.0.0 | `.env` file loading |
+| `anthropic` | ≥0.7.0 | Anthropic API client |
+| `langchain` | ≥0.3.0 | LLM chain orchestration |
+| `langchain-anthropic` | ≥0.3.0 | Claude via LangChain |
+| `langsmith` | ≥0.1.0 | LLM tracing (optional) |
+
+### Development
+
+| Package | Purpose |
+|---|---|
+| `pytest` | Testing |
+| `black` | Code formatting |
+| `mypy` | Type checking |
+| `ruff` | Linting |
+
+---
+
+## Observability Files (runtime, not in repo)
+
+| Path | Format | Created By | Purpose |
+|---|---|---|---|
+| `~/.mcpflux/events.jsonl` | JSONL | `JsonlObserver` | One line per pipeline event |
+| `~/.mcpflux/metrics.db` | SQLite | `SqliteObserver` | One row per completed run |
