@@ -14,7 +14,7 @@ class Config:
 
     # LLM Configuration
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")  # "anthropic" | "openai"
-    MODEL_NAME: str = os.getenv("MODEL_NAME", "claude-haiku-4-5")
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "claude-opus-4-6")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
