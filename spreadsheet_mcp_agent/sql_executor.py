@@ -31,7 +31,7 @@ def execute_sql(data_context: DataContext, sql: str) -> pd.DataFrame:
     try:
         conn = duckdb.connect(":memory:")
         for table_name, df in data_context.items():
-            conn.register(table_name, df)
+            conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM df')
 
         result = conn.execute(sql).fetch_df()
         logger.info(f"Query executed successfully. Result shape: {result.shape}")
@@ -64,7 +64,7 @@ def validate_sql(data_context: DataContext, sql: str) -> bool:
     try:
         conn = duckdb.connect(":memory:")
         for table_name, df in data_context.items():
-            conn.register(table_name, df)
+            conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM df')
         conn.execute(f"EXPLAIN {sql}")
         return True
 
