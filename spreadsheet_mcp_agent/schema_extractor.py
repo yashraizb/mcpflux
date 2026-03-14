@@ -1,83 +1,41 @@
 """Schema extraction utilities for DataFrames."""
 
 import logging
-from typing import Any
 
 import pandas as pd
+
+from .loaders import DataContext
 
 logger = logging.getLogger(__name__)
 
 
-def extract_schema(df: pd.DataFrame) -> str:
-    """Extract schema information from a DataFrame.
+def extract_schema(data_context: DataContext) -> str:
+    """Extract schema information from a DataContext (one or more named DataFrames).
 
     Args:
-        df: Input DataFrame.
+        data_context: Dict mapping table names to DataFrames.
 
     Returns:
         Formatted schema string suitable for LLM prompts.
     """
-    logger.info("Extracting schema from DataFrame")
+    logger.info(f"Extracting schema from {len(data_context)} table(s)")
 
-    # Column information
-    column_info = []
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        column_info.append(f"  - {col}: {dtype}")
+    sections = []
+    for table_name, df in data_context.items():
+        column_info = [f"  - {col}: {df[col].dtype}" for col in df.columns]
+        columns_section = "\n".join(column_info)
+        sample_data = df.head(5).to_string(index=False)
 
-    columns_section = "\n".join(column_info)
-
-    # Sample data (first 5 rows)
-    sample_rows = df.head(5)
-    sample_data = sample_rows.to_string(index=False)
-
-    # Row count
-    row_count = len(df)
-
-    schema = f"""Table: data
+        section = f"""Table: {table_name}
 Columns:
 {columns_section}
 
-Row count: {row_count}
+Row count: {len(df)}
 
 Sample data:
 {sample_data}"""
+        sections.append(section)
 
+    schema = "\n\n---\n\n".join(sections)
     logger.info(f"Schema extracted: {len(schema)} characters")
     return schema
-
-
-def get_column_names(df: pd.DataFrame) -> list[str]:
-    """Get list of column names from DataFrame.
-
-    Args:
-        df: Input DataFrame.
-
-    Returns:
-        List of column names.
-    """
-    return df.columns.tolist()
-
-
-def get_column_types(df: pd.DataFrame) -> dict[str, str]:
-    """Get dictionary of column names to data types.
-
-    Args:
-        df: Input DataFrame.
-
-    Returns:
-        Dictionary mapping column names to data types.
-    """
-    return {col: str(df[col].dtype) for col in df.columns}
-
-
-def get_row_count(df: pd.DataFrame) -> int:
-    """Get number of rows in DataFrame.
-
-    Args:
-        df: Input DataFrame.
-
-    Returns:
-        Number of rows.
-    """
-    return len(df)

@@ -1,19 +1,23 @@
 """SQL query execution on DataFrames using DuckDB."""
 
 import logging
-from typing import Any
 
 import duckdb
 import pandas as pd
 
+from .loaders import DataContext
+
 logger = logging.getLogger(__name__)
 
 
-def execute_sql(df: pd.DataFrame, sql: str) -> pd.DataFrame:
-    """Execute SQL query on a DataFrame using DuckDB.
+def execute_sql(data_context: DataContext, sql: str) -> pd.DataFrame:
+    """Execute SQL query against a DataContext using DuckDB.
+
+    Each key in *data_context* is registered as a DuckDB table with that name,
+    allowing the SQL to reference any table (or JOIN across tables).
 
     Args:
-        df: Input DataFrame to query.
+        data_context: Dict mapping table names to DataFrames.
         sql: SQL query to execute.
 
     Returns:
@@ -25,15 +29,11 @@ def execute_sql(df: pd.DataFrame, sql: str) -> pd.DataFrame:
     logger.info(f"Executing SQL: {sql[:100]}...")
 
     try:
-        # Create DuckDB connection
         conn = duckdb.connect(":memory:")
+        for table_name, df in data_context.items():
+            conn.register(table_name, df)
 
-        # Register DataFrame as table
-        conn.register("data", df)
-
-        # Execute query
         result = conn.execute(sql).fetch_df()
-
         logger.info(f"Query executed successfully. Result shape: {result.shape}")
         return result
 
@@ -48,10 +48,11 @@ def execute_sql(df: pd.DataFrame, sql: str) -> pd.DataFrame:
             pass
 
 
-def validate_sql(sql: str) -> bool:
+def validate_sql(data_context: DataContext, sql: str) -> bool:
     """Validate SQL query syntax without executing it.
 
     Args:
+        data_context: Dict mapping table names to DataFrames.
         sql: SQL query to validate.
 
     Returns:
@@ -62,6 +63,8 @@ def validate_sql(sql: str) -> bool:
     """
     try:
         conn = duckdb.connect(":memory:")
+        for table_name, df in data_context.items():
+            conn.register(table_name, df)
         conn.execute(f"EXPLAIN {sql}")
         return True
 
