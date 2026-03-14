@@ -69,7 +69,7 @@ class SpreadsheetQueryFacade:
             data_context = self._load(file_path, run_id)
             schema = self._extract_schema(data_context, run_id)
             sql = self._generate_sql(schema, question, run_id)
-            final_sql, result_df, attempt = self._execute_sql(data_context, schema, sql, run_id)
+            final_sql, result_df, attempt = self._execute_sql(data_context, schema, sql, run_id, question)
             result = self._format_result(final_sql, result_df)
 
             self._notify(PipelineStage.COMPLETE, {
@@ -109,35 +109,43 @@ class SpreadsheetQueryFacade:
         return sql
 
     def _execute_sql(
-        self, data_context: DataContext, schema: str, sql: str, run_id: str
+        self, data_context: DataContext, schema: str, sql: str, run_id: str,
+        question: str = "",
     ) -> tuple[str, pd.DataFrame, int]:
         original_sql = sql
 
         def execute_func(s: str) -> Any:
             return execute_sql(data_context, s)
 
-        final_sql, result_df = retry_with_recovery(
-            schema, sql, execute_func, max_retries=config.MAX_SQL_RETRIES
+        final_sql, result_df, was_decomposed = retry_with_recovery(
+            schema,
+            sql,
+            execute_func,
+            max_retries=config.MAX_SQL_RETRIES,
+            data_context=data_context,
+            question=question,
         )
 
-        # Emit correction event if SQL was changed
-        if final_sql != original_sql:
+        if was_decomposed:
+            self._notify(PipelineStage.SQL_DECOMPOSED, {
+                "run_id": run_id,
+                "original_sql": original_sql[:120],
+                "final_sql": final_sql[:120],
+            })
+        elif final_sql != original_sql:
             self._notify(PipelineStage.SQL_CORRECTED, {
                 "run_id": run_id,
                 "original_sql": original_sql[:120],
                 "corrected_sql": final_sql[:120],
             })
 
-        # Derive attempt count from handler context (handlers track ctx.attempt)
-        # attempt is 1-based: attempt=1 means first try succeeded
-        from .handlers import SqlContext
-        attempt = 1  # minimum; corrections increment this via ctx.attempt in handlers
+        attempt = 1  # 1-based; kept for observer compatibility
 
         self._notify(PipelineStage.SQL_EXECUTED, {
             "run_id": run_id,
             "row_count": len(result_df),
             "attempt": attempt,
-            "sql_was_corrected": final_sql != original_sql,
+            "sql_was_decomposed": was_decomposed,
         })
         return final_sql, result_df, attempt
 

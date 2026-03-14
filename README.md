@@ -89,7 +89,7 @@ SpreadsheetQueryFacade          ← Facade pattern; orchestrates pipeline
     │   └── LLMProvider          (Anthropic / OpenAI / Google)
     │
     └── retry_with_recovery()   ← Chain of Responsibility
-            ExecuteHandler → CorrectionHandler → ExhaustedHandler
+            ExecuteHandler → DecompositionHandler → ExhaustedHandler
 
 Observers (notified at every stage):
     ├── LoggingObserver          ← Python logger
@@ -228,11 +228,10 @@ Set `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` to get full LLM-level tr
 
 ## Error Handling
 
-SQL errors trigger the Chain of Responsibility:
-1. `ExecuteHandler` attempts SQL execution
-2. On failure → `CorrectionHandler` sends SQL + error to LLM for correction
-3. Retries from step 1 (up to `MAX_SQL_RETRIES` times)
-4. `ExhaustedHandler` raises a descriptive error if all retries fail
+SQL errors trigger the Chain of Responsibility with a proactive try-first-then-decompose strategy:
+1. `ExecuteHandler` tries the direct single SQL query
+2. On failure → `DecompositionHandler` asks the LLM to break the question into sequential SQL steps and executes each one, feeding intermediate results as named tables to later steps
+3. `ExhaustedHandler` raises a descriptive error if both direct and decomposed execution fail
 
 ## Development
 

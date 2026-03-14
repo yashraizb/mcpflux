@@ -88,14 +88,19 @@ mcpflux/
 - **`SqliteObserver`**: Writes one row per completed run to `~/.mcpflux/metrics.db`; accumulates state in `self._runs` keyed by `run_id`
 
 #### `spreadsheet_mcp_agent/handlers.py`
-- **Pattern**: Chain of Responsibility
-- **`SqlContext`**: Dataclass — schema, sql, execute_func, max_retries, attempt, last_error, result, success
+- **Pattern**: Chain of Responsibility (proactive try-first-then-decompose)
+- **`SqlContext`**: Dataclass — schema, sql, execute_func, max_retries, attempt, last_error, result, success, data_context, question, was_decomposed
 - **`SqlHandler`**: ABC with `handle(ctx)` and `set_next(handler)`
-- **`ExecuteHandler`**: Calls `execute_func(ctx.sql)`, sets `ctx.success = True` on success
-- **`CorrectionHandler`**: On failure, builds a LangChain correction prompt, calls LLM, updates `ctx.sql`, increments `ctx.attempt`, re-triggers chain
-- **`ExhaustedHandler`**: Terminal handler — raises `RuntimeError` when retries exhausted
-- **`build_handler_chain(schema, execute_func, max_retries)`**: Factory
-- **`retry_with_recovery(schema, sql, execute_func, max_retries)`**: Public API
+- **`ExecuteHandler`**: Tries the direct SQL; sets `ctx.success = True` on success; passes to DecompositionHandler on first failure
+- **`DecompositionHandler`**: On failure, calls `decompose_query()` to get sequential SQL steps; executes each step building up a working DataContext; sets `ctx.was_decomposed = True` on success
+- **`ExhaustedHandler`**: Terminal handler — raises `RuntimeError` when both direct and decomposed execution fail
+- **`build_handler_chain(max_retries)`**: Factory — wires Execute → Decompose → Exhausted
+- **`retry_with_recovery(schema, sql, execute_func, ..., data_context, question)`**: Public API; returns `(final_sql, result_df, was_decomposed)`
+
+#### `spreadsheet_mcp_agent/query_decomposer.py`
+- **`QueryStep`**: Dataclass — step_name, sql, description
+- **`decompose_query(schema, question) -> list[QueryStep]`**: Calls LLM to break a complex question into sequential SQL steps; parses JSON response
+- **`_parse_steps(response)`**: Validates and parses the LLM JSON output
 
 #### `spreadsheet_mcp_agent/providers.py`
 - **Pattern**: Strategy

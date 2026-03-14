@@ -29,6 +29,7 @@ class PipelineStage(str, Enum):
     SCHEMA_EXTRACTED = "schema_extracted"
     SQL_GENERATED = "sql_generated"
     SQL_CORRECTED = "sql_corrected"
+    SQL_DECOMPOSED = "sql_decomposed"
     SQL_EXECUTED = "sql_executed"
     COMPLETE = "complete"
     ERROR = "error"

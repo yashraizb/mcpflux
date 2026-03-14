@@ -31,7 +31,7 @@
 │  ┌──────▼───────────────────────────────────────▼──────────┐  │
 │  │         retry_with_recovery()  (handlers.py)            │  │
 │  │         Chain of Responsibility:                        │  │
-│  │         ExecuteHandler → CorrectionHandler →            │  │
+│  │         ExecuteHandler → DecompositionHandler →         │  │
 │  │                          ExhaustedHandler               │  │
 │  └─────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────┘
@@ -81,10 +81,10 @@
 Selected by `LLM_PROVIDER` env var via `get_provider()` factory.
 
 ### Chain of Responsibility (`handlers.py`)
-SQL execution flows through a handler chain carried by `SqlContext`:
-1. `ExecuteHandler` — attempts `execute_sql()`; marks `ctx.success = True` if OK
-2. `CorrectionHandler` — on failure, calls LLM with `(schema, broken_sql, error)` to get corrected SQL; increments `ctx.attempt`; re-triggers chain from step 1
-3. `ExhaustedHandler` — terminal handler, raises after `max_retries` exhausted
+SQL execution uses a proactive try-first-then-decompose strategy through a handler chain carried by `SqlContext`:
+1. `ExecuteHandler` — tries the direct SQL query; marks `ctx.success = True` if OK
+2. `DecompositionHandler` — on any failure, calls the LLM to decompose the question into sequential SQL steps (`query_decomposer.py`); executes each step, materialising intermediate results as named tables; sets `ctx.was_decomposed = True` on success
+3. `ExhaustedHandler` — terminal handler, raises after both direct and decomposed execution fail
 
 ---
 
@@ -125,17 +125,17 @@ Input: file_path, question
   │   [SQL_GENERATED event] sql (truncated)
   │
   ├─ retry_with_recovery()
-  │   ├─ Attempt 1: ExecuteHandler
+  │   ├─ ExecuteHandler: try direct SQL query
   │   │   ├─ Success ──────────────────► result DataFrame
-  │   │   │   [SQL_EXECUTED event] row_count, attempt=1
-  │   │   └─ Failure
+  │   │   │   [SQL_EXECUTED event] row_count, sql_was_decomposed=False
+  │   │   └─ Failure (any error)
   │   │         ▼
-  │   │       CorrectionHandler (LLM corrects SQL)
-  │   │         [SQL_CORRECTED event] original_sql, corrected_sql
-  │   │         ▼
-  │   ├─ Attempt 2: ExecuteHandler (with corrected SQL)
-  │   │   ├─ Success ──────────────────► result DataFrame
-  │   │   └─ ... (up to MAX_SQL_RETRIES)
+  │   │       DecompositionHandler (LLM breaks question into steps)
+  │   │         [SQL_DECOMPOSED event] original_sql, final_sql
+  │   │         ├─ Execute step 1 → intermediate DataFrame (added to context)
+  │   │         ├─ Execute step 2 → intermediate DataFrame (added to context)
+  │   │         └─ ... → final result DataFrame
+  │   │             [SQL_EXECUTED event] row_count, sql_was_decomposed=True
   │   └─ ExhaustedHandler → raises
   │
   ├─ [COMPLETE event] row_count, latency_ms
@@ -158,8 +158,9 @@ The MCP server process is killed when Claude Desktop exits — all in-memory sta
 | `file_loaded` | File parsed into DataFrame | run_id, shape |
 | `schema_extracted` | Schema string built | run_id, schema_length |
 | `sql_generated` | LLM produced SQL | run_id, sql (truncated) |
-| `sql_corrected` | CorrectionHandler ran | run_id, original_sql, corrected_sql |
-| `sql_executed` | SQL ran successfully | run_id, row_count, attempt, sql_was_corrected |
+| `sql_corrected` | SQL changed (legacy path) | run_id, original_sql, corrected_sql |
+| `sql_decomposed` | DecompositionHandler ran | run_id, original_sql, final_sql |
+| `sql_executed` | SQL ran successfully | run_id, row_count, attempt, sql_was_decomposed |
 | `complete` | Pipeline finished | run_id, row_count, latency_ms |
 | `error` | Unhandled exception | run_id, error, error_type, latency_ms |
 
@@ -258,12 +259,13 @@ LLM:    Prompted to return only a SQL SELECT statement
 Output: SQL string (markdown fences stripped)
 ```
 
-### 2. SQL Correction (`handlers.py` — CorrectionHandler)
+### 2. Query Decomposition (`query_decomposer.py` — DecompositionHandler)
 ```
-Input:  schema + broken_sql + error_message
-LLM:    Prompted to return only the corrected SQL
-Output: Corrected SQL string
+Input:  schema + question (when direct SQL failed)
+LLM:    Prompted to return a JSON array of sequential SQL steps
+Output: List of QueryStep(step_name, sql, description)
 ```
+Each step is executed in order; its result DataFrame is added to the working DataContext under `step_name`, making it available as a table for subsequent steps.
 Both use LangChain `PromptTemplate | LLM | StrOutputParser` chains, which are auto-traced by LangSmith when enabled.
 
 ---
