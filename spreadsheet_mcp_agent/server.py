@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from .config import config
 from .events import JsonlObserver, LoggingObserver, SqliteObserver
 from .facade import SpreadsheetQueryFacade
+from .multi_step_planner import MultiStepQueryPlanner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +22,7 @@ _facade = SpreadsheetQueryFacade(observers=[
     JsonlObserver(config.EVENTS_LOG_PATH or None),
     SqliteObserver(config.METRICS_DB_PATH or None),
 ])
+_planner = MultiStepQueryPlanner()
 
 
 @mcp.tool()
@@ -39,6 +41,33 @@ def query_spreadsheet(file_path: str, question: str) -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Query failed: {str(e)}", exc_info=True)
+        return json.dumps({"success": False, "error": str(e), "error_type": type(e).__name__}, indent=2)
+
+
+@mcp.tool()
+def query_spreadsheet_complex(file_paths: list[str], question: str) -> str:
+    """Query one or more spreadsheets with complex multi-step analytical questions.
+
+    Automatically assesses whether the question requires multiple sequential
+    SQL steps. If so, executes each step in order, making each step's result
+    available as a named table for the next step.
+
+    Args:
+        file_paths: List of paths to CSV or Excel files. All files are loaded
+                    into a shared DataContext so queries can JOIN across them.
+        question: Natural language analytical question, including complex ones
+                  involving window functions, MoM deltas, percentile rankings,
+                  coefficient of variation, or composite scoring.
+
+    Returns:
+        JSON string with: success, complexity, steps_executed (list of step traces
+        with sql/row_count/preview per step), final_result, generated_sql.
+    """
+    try:
+        result = _planner.execute(file_paths, question)
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Complex query failed: {str(e)}", exc_info=True)
         return json.dumps({"success": False, "error": str(e), "error_type": type(e).__name__}, indent=2)
 
 
